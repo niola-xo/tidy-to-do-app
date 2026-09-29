@@ -86,6 +86,12 @@ export function VoiceBrainDump({
   const recognitionRef = useRef<any>(null);
   const shouldListenRef = useRef(false);
   const baseTranscriptRef = useRef('');
+  const currentTranscriptRef = useRef('');
+
+  // Keep currentTranscriptRef in sync with transcript
+  useEffect(() => {
+    currentTranscriptRef.current = transcript;
+  }, [transcript]);
 
   // Initialize Web Speech API
   useEffect(() => {
@@ -107,6 +113,7 @@ export function VoiceBrainDump({
       setTranscript('');
       setInterimText('');
       baseTranscriptRef.current = '';
+      currentTranscriptRef.current = '';
       setOrganizeError(null);
       setProposedSpaces([]);
     }
@@ -124,7 +131,7 @@ export function VoiceBrainDump({
     shouldListenRef.current = true;
     setIsListening(true);
     setPermissionDenied(false);
-    baseTranscriptRef.current = transcript.trim();
+    baseTranscriptRef.current = currentTranscriptRef.current.trim();
 
     try {
       if (recognitionRef.current) {
@@ -143,7 +150,6 @@ export function VoiceBrainDump({
       };
 
       recognition.onerror = (event: any) => {
-        // 'no-speech' is a natural pause when speaking. Keep listening alive!
         if (event.error === 'no-speech') {
           return;
         }
@@ -160,9 +166,9 @@ export function VoiceBrainDump({
       };
 
       recognition.onend = () => {
-        // If user hasn't explicitly paused, auto-restart seamlessly so natural pauses don't cut them off
+        // If user hasn't explicitly paused, lock in current text and auto-restart seamlessly
         if (shouldListenRef.current) {
-          baseTranscriptRef.current = transcript.trim();
+          baseTranscriptRef.current = currentTranscriptRef.current.trim();
           try {
             recognition.start();
           } catch (e) {
@@ -181,33 +187,21 @@ export function VoiceBrainDump({
       };
 
       recognition.onresult = (event: any) => {
-        let sessionFinal = '';
-        let sessionInterim = '';
+        let sessionText = '';
 
         for (let i = 0; i < event.results.length; i++) {
-          const res = event.results[i];
-          if (res.isFinal) {
-            sessionFinal += res[0].transcript + ' ';
-          } else {
-            sessionInterim += res[0].transcript;
+          sessionText += event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            sessionText += ' ';
           }
         }
 
-        setInterimText(sessionInterim);
-
-        // Immediate real-time streaming update:
-        // Words appear instantaneously on-screen as the user pronounces them!
         const base = baseTranscriptRef.current;
-        const separator = base && (sessionFinal || sessionInterim) ? ' ' : '';
-        const combined = (base + separator + sessionFinal + (sessionInterim ? ' ' + sessionInterim : '')).replace(/\s+/g, ' ').trim();
+        const separator = base && sessionText.trim() ? ' ' : '';
+        const combined = (base + separator + sessionText).replace(/\s+/g, ' ').trim();
 
         setTranscript(combined.slice(0, 5000));
-
-        // When a sentence/clause finalizes, update base to avoid any backtrack
-        if (sessionFinal.trim()) {
-          const finalBase = (base + (base ? ' ' : '') + sessionFinal).replace(/\s+/g, ' ').trim();
-          baseTranscriptRef.current = finalBase;
-        }
+        currentTranscriptRef.current = combined.slice(0, 5000);
       };
 
       recognitionRef.current = recognition;
@@ -222,13 +216,11 @@ export function VoiceBrainDump({
   const stopListening = () => {
     shouldListenRef.current = false;
     setInterimText('');
-    baseTranscriptRef.current = transcript.trim();
+    baseTranscriptRef.current = currentTranscriptRef.current.trim();
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch (e) {
-        // Ignore
-      }
+      } catch (e) {}
       recognitionRef.current = null;
     }
     setIsListening(false);
