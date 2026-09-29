@@ -492,13 +492,13 @@ export function VoiceBrainDump({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-6 overflow-hidden sm:rounded-2xl">
-        <DialogHeader className="pb-2 border-b">
-          <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+      <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[92dvh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-2xl">
+        <DialogHeader className="pb-3 border-b shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold">
             <Sparkles className="h-5 w-5 text-indigo-500 animate-pulse" />
             {stage === 'record' ? 'Voice Brain Dump' : 'Review & Confirm Tasks'}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs sm:text-sm">
             {stage === 'record'
               ? 'Ramble out your thoughts freely. Tidy AI will categorize and turn them into organized checklists.'
               : 'Review proposed spaces, lists, and tasks. You can edit, delete, or reassign anything before saving.'}
@@ -506,13 +506,13 @@ export function VoiceBrainDump({
         </DialogHeader>
 
         {stage === 'record' ? (
-          <div className="flex-1 flex flex-col gap-4 overflow-y-auto py-4">
+          <div className="flex-1 flex flex-col gap-3 sm:gap-4 overflow-y-auto py-2 sm:py-3 min-h-0">
             {/* Live Visualizer & Mic Control */}
-            <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-secondary/30 border border-border/50 relative overflow-hidden">
+            <div className="shrink-0 flex flex-col items-center justify-center py-5 px-4 rounded-2xl bg-secondary/30 border border-border/50 relative">
               <AnimatePresence>
                 {isListening && (
                   <motion.div
-                    className="absolute inset-0 bg-indigo-500/10 -z-0 pointer-events-none"
+                    className="absolute inset-0 rounded-2xl bg-indigo-500/10 pointer-events-none"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -521,33 +521,33 @@ export function VoiceBrainDump({
               </AnimatePresence>
 
               {/* Pulsing Animated Mic Button */}
-              <div className="relative mb-3">
+              <div className="relative my-2 flex items-center justify-center">
                 {isListening && (
                   <motion.div
-                    className="absolute inset-0 rounded-full bg-indigo-500/30"
-                    animate={{ scale: [1, 1.4, 1], opacity: [0.6, 0.2, 0.6] }}
+                    className="absolute -inset-3 rounded-full bg-indigo-500/25 pointer-events-none"
+                    animate={{ scale: [1, 1.35, 1], opacity: [0.7, 0.2, 0.7] }}
                     transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
                   />
                 )}
-                <Button
-                  size="icon"
+                <button
+                  type="button"
                   onClick={toggleListening}
-                  className={`h-20 w-20 rounded-full shadow-lg transition-all duration-300 relative z-10 ${
+                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-full shadow-lg transition-all duration-300 relative z-10 flex items-center justify-center text-white active:scale-95 ${
                     isListening
-                      ? 'bg-rose-500 hover:bg-rose-600 text-white ring-4 ring-rose-500/20'
-                      : 'bg-indigo-600 hover:bg-indigo-700 text-white ring-4 ring-indigo-500/10'
+                      ? 'bg-rose-500 hover:bg-rose-600 ring-4 ring-rose-500/20'
+                      : 'bg-indigo-600 hover:bg-indigo-700 ring-4 ring-indigo-500/10'
                   }`}
                 >
                   {isListening ? (
-                    <MicOff className="h-8 w-8 animate-pulse" />
+                    <MicOff className="h-7 w-7 sm:h-8 sm:w-8 animate-pulse" />
                   ) : (
-                    <Mic className="h-8 w-8" />
+                    <Mic className="h-7 w-7 sm:h-8 sm:w-8" />
                   )}
-                </Button>
+                </button>
               </div>
 
-              <div className="text-center">
-                <p className="font-semibold text-sm">
+              <div className="text-center mt-1">
+                <p className="font-semibold text-xs sm:text-sm">
                   {isListening ? (
                     <span className="text-rose-500 flex items-center justify-center gap-1.5">
                       <span className="h-2 w-2 rounded-full bg-rose-500 animate-ping" />
@@ -559,7 +559,7 @@ export function VoiceBrainDump({
                     'Tap to start speaking'
                   )}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
                   Speak naturally about both work and personal tasks. We’ll sort it out.
                 </p>
               </div>
@@ -771,37 +771,40 @@ export function VoiceBrainDump({
           </div>
         )}
 
-        <DialogFooter className="pt-3 border-t flex flex-row items-center justify-between sm:justify-between w-full">
+        {/* Custom clean footer without negative margin clipping */}
+        <div className="pt-3 border-t mt-auto shrink-0 flex items-center justify-between gap-2 w-full">
           {stage === 'record' ? (
             <>
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={() => {
                   setTranscript('');
                   stopListening();
                 }}
                 disabled={!transcript || isOrganizing}
-                className="text-xs text-muted-foreground"
+                className="text-xs text-muted-foreground px-2 h-9"
               >
                 Clear text
               </Button>
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={onClose} disabled={isOrganizing}>
+                <Button variant="outline" size="sm" onClick={onClose} disabled={isOrganizing} className="h-9">
                   Cancel
                 </Button>
                 <Button
+                  size="sm"
                   onClick={handleOrganize}
                   disabled={!transcript.trim() || isOrganizing}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium h-9 px-4 shadow-sm"
                 >
                   {isOrganizing ? (
                     <>
-                      <Sparkles className="h-4 w-4 mr-1.5 animate-spin" />
-                      Organizing with AI...
+                      <Sparkles className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      Organizing...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="h-4 w-4 mr-1.5" />
+                      <Sparkles className="h-3.5 w-3.5 mr-1.5" />
                       Organize
                     </>
                   )}
@@ -812,23 +815,25 @@ export function VoiceBrainDump({
             <>
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => setStage('record')}
                 disabled={isSaving}
-                className="text-xs"
+                className="text-xs h-9"
               >
-                ← Back to transcript
+                ← Back
               </Button>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" onClick={onClose} disabled={isSaving}>
+                <Button variant="ghost" size="sm" onClick={onClose} disabled={isSaving} className="h-9">
                   Discard
                 </Button>
                 <Button
+                  size="sm"
                   onClick={handleSaveToDatabase}
                   disabled={isSaving || proposedSpaces.length === 0}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium h-9 px-4 shadow-sm"
                 >
                   {isSaving ? (
-                    'Saving to database...'
+                    'Saving...'
                   ) : (
                     <>
                       <CheckCircle2 className="h-4 w-4 mr-1.5" />
@@ -839,7 +844,7 @@ export function VoiceBrainDump({
               </div>
             </>
           )}
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
