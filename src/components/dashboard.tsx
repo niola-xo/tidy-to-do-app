@@ -15,7 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Menu, Plus, Trash2, LogOut, Sun, Moon, GripVertical, Pencil, Check, X } from 'lucide-react';
+import { Menu, Plus, Trash2, LogOut, Sun, Moon, GripVertical, Pencil, Check, X, Mic, Sparkles } from 'lucide-react';
+import { VoiceBrainDump } from '@/components/voice-brain-dump';
 import { useTheme } from 'next-themes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logout } from '@/app/login/actions';
@@ -246,6 +247,7 @@ function Sidebar({
   userEmail,
   theme,
   setTheme,
+  onOpenVoice,
 }: {
   spaces: Space[];
   activeSpaceId: string | null;
@@ -257,6 +259,7 @@ function Sidebar({
   userEmail: string;
   theme: string | undefined;
   setTheme: (t: string) => void;
+  onOpenVoice: () => void;
 }) {
   return (
     <div className="flex flex-col h-full w-64 shrink-0 border-r bg-card px-3 py-4 gap-4">
@@ -274,6 +277,16 @@ function Sidebar({
           <span className="sr-only">Toggle theme</span>
         </Button>
       </div>
+
+      {/* Voice Brain Dump CTA Button */}
+      <button
+        onClick={onOpenVoice}
+        className="flex items-center justify-center gap-2.5 w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-medium text-sm shadow-md hover:shadow-lg transition-all duration-200 group"
+      >
+        <Mic className="h-4 w-4 group-hover:scale-110 transition-transform" />
+        <span>Voice Brain Dump</span>
+        <Sparkles className="h-3.5 w-3.5 opacity-80" />
+      </button>
 
       {/* Spaces */}
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -345,6 +358,7 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
   const [newSpaceName, setNewSpaceName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'space' | 'list'; item: Space | List } | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const supabase = createClient();
 
@@ -538,6 +552,7 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
     onSelectSpace: setActiveSpaceId,
     onCreateSpace: createSpace,
     onDeleteSpace: (s: Space) => setDeleteTarget({ type: 'space', item: s }),
+    onOpenVoice: () => setIsVoiceOpen(true),
   };
 
   const SidebarEl = <Sidebar {...sidebarProps} />;
@@ -558,10 +573,21 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
             </SheetContent>
           </Sheet>
           <span className="font-bold text-sm">{activeSpace?.name ?? 'Tidy'}</span>
-          <Button variant="ghost" size="icon" className="relative h-8 w-8" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-            <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-            <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+              onClick={() => setIsVoiceOpen(true)}
+              title="Voice Brain Dump"
+            >
+              <Mic size={18} />
+            </Button>
+            <Button variant="ghost" size="icon" className="relative h-8 w-8" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+            </Button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto">
@@ -582,10 +608,20 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ duration: 0.2 }}
                 >
-                  {/* Space header */}
-                  <div className="flex items-center gap-3 mb-8">
-                    <span className={`h-3 w-3 rounded-full ${accent.bg}`} />
-                    <h1 className="text-2xl font-bold tracking-tight">{activeSpace.name}</h1>
+                  {/* Space header with prominent Voice Brain Dump button */}
+                  <div className="flex items-center justify-between gap-3 mb-8">
+                    <div className="flex items-center gap-3">
+                      <span className={`h-3 w-3 rounded-full ${accent.bg}`} />
+                      <h1 className="text-2xl font-bold tracking-tight">{activeSpace.name}</h1>
+                    </div>
+                    <Button
+                      onClick={() => setIsVoiceOpen(true)}
+                      className="hidden sm:flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white shadow-sm text-xs font-semibold px-3.5 h-9 transition-all hover:shadow"
+                    >
+                      <Mic size={14} />
+                      <span>Voice Brain Dump</span>
+                      <Sparkles size={13} className="opacity-80" />
+                    </Button>
                   </div>
 
                   {spaceLists.length === 0 ? (
@@ -658,6 +694,29 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Floating Action Button (Always reachable) */}
+      <button
+        onClick={() => setIsVoiceOpen(true)}
+        className="sm:hidden fixed bottom-6 right-6 h-14 w-14 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-xl flex items-center justify-center ring-4 ring-indigo-500/20 active:scale-95 transition-transform z-30"
+        aria-label="Voice Brain Dump"
+      >
+        <Mic className="h-6 w-6" />
+      </button>
+
+      {/* Voice Brain Dump Dialog & Review Screen */}
+      {userId && (
+        <VoiceBrainDump
+          isOpen={isVoiceOpen}
+          onClose={() => setIsVoiceOpen(false)}
+          existingSpaces={spaces}
+          userId={userId}
+          onSaved={async () => {
+            await loadSpaces(userId);
+            if (activeSpaceId) await loadListsAndTasks(activeSpaceId);
+          }}
+        />
+      )}
     </div>
   );
 }
