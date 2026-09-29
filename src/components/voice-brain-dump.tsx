@@ -73,6 +73,7 @@ export function VoiceBrainDump({
   const [transcript, setTranscript] = useState('');
   const [isSpeechSupported, setIsSpeechSupported] = useState(true);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [interimText, setInterimText] = useState('');
 
   // Organizing state
   const [isOrganizing, setIsOrganizing] = useState(false);
