@@ -82,10 +82,9 @@ export function VoiceBrainDump({
   const [proposedSpaces, setProposedSpaces] = useState<ProposedSpace[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
-  const [interimText, setInterimText] = useState('');
-
   const recognitionRef = useRef<any>(null);
   const shouldListenRef = useRef(false);
+  const baseTranscriptRef = useRef('');
 
   // Initialize Web Speech API
   useEffect(() => {
@@ -106,6 +105,7 @@ export function VoiceBrainDump({
       setStage('record');
       setTranscript('');
       setInterimText('');
+      baseTranscriptRef.current = '';
       setOrganizeError(null);
       setProposedSpaces([]);
     }
@@ -123,6 +123,7 @@ export function VoiceBrainDump({
     shouldListenRef.current = true;
     setIsListening(true);
     setPermissionDenied(false);
+    baseTranscriptRef.current = transcript.trim();
 
     try {
       if (recognitionRef.current) {
@@ -141,8 +142,7 @@ export function VoiceBrainDump({
       };
 
       recognition.onerror = (event: any) => {
-        // 'no-speech' happens naturally when the speaker pauses.
-        // Do NOT stop listening; onend will automatically keep recognition alive!
+        // 'no-speech' is a natural pause when speaking. Keep listening alive!
         if (event.error === 'no-speech') {
           return;
         }
@@ -159,8 +159,9 @@ export function VoiceBrainDump({
       };
 
       recognition.onend = () => {
-        // If user hasn't explicitly paused, auto-restart so natural pauses don't cut them off
+        // If user hasn't explicitly paused, auto-restart seamlessly so natural pauses don't cut them off
         if (shouldListenRef.current) {
+          baseTranscriptRef.current = transcript.trim();
           try {
             recognition.start();
           } catch (e) {
@@ -170,7 +171,7 @@ export function VoiceBrainDump({
                   recognition.start();
                 } catch (err) {}
               }
-            }, 120);
+            }, 100);
           }
         } else {
           setIsListening(false);
@@ -179,26 +180,32 @@ export function VoiceBrainDump({
       };
 
       recognition.onresult = (event: any) => {
-        let finalChunk = '';
-        let interimChunk = '';
+        let sessionFinal = '';
+        let sessionInterim = '';
 
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const trans = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalChunk += trans + ' ';
+        for (let i = 0; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (res.isFinal) {
+            sessionFinal += res[0].transcript + ' ';
           } else {
-            interimChunk += trans;
+            sessionInterim += res[0].transcript;
           }
         }
 
-        setInterimText(interimChunk);
+        setInterimText(sessionInterim);
 
-        if (finalChunk.trim()) {
-          setTranscript((prev) => {
-            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-            const combined = (prev + separator + finalChunk.trim()).replace(/\s+/g, ' ');
-            return combined.slice(0, 5000);
-          });
+        // Immediate real-time streaming update:
+        // Words appear instantaneously on-screen as the user pronounces them!
+        const base = baseTranscriptRef.current;
+        const separator = base && (sessionFinal || sessionInterim) ? ' ' : '';
+        const combined = (base + separator + sessionFinal + (sessionInterim ? ' ' + sessionInterim : '')).replace(/\s+/g, ' ').trim();
+
+        setTranscript(combined.slice(0, 5000));
+
+        // When a sentence/clause finalizes, update base to avoid any backtrack
+        if (sessionFinal.trim()) {
+          const finalBase = (base + (base ? ' ' : '') + sessionFinal).replace(/\s+/g, ' ').trim();
+          baseTranscriptRef.current = finalBase;
         }
       };
 
@@ -214,6 +221,7 @@ export function VoiceBrainDump({
   const stopListening = () => {
     shouldListenRef.current = false;
     setInterimText('');
+    baseTranscriptRef.current = transcript.trim();
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -633,7 +641,11 @@ export function VoiceBrainDump({
               </div>
               <textarea
                 value={transcript}
-                onChange={(e) => setTranscript(e.target.value.slice(0, 5000))}
+                onChange={(e) => {
+                  const val = e.target.value.slice(0, 5000);
+                  setTranscript(val);
+                  baseTranscriptRef.current = val;
+                }}
                 placeholder="I need to submit the tax report by Friday and review the client contract for work tomorrow. Also remind me to buy groceries like almond milk and apples, and schedule a haircut for Saturday."
                 rows={5}
                 className="w-full flex-1 min-h-[140px] p-3.5 rounded-xl border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-sans leading-relaxed"
@@ -822,6 +834,7 @@ export function VoiceBrainDump({
                 size="sm"
                 onClick={() => {
                   setTranscript('');
+                  baseTranscriptRef.current = '';
                   stopListening();
                 }}
                 disabled={!transcript || isOrganizing}
