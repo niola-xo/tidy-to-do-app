@@ -110,7 +110,7 @@ You MUST respond with pure JSON conforming to this schema:
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: prompt,
           config: {
             systemInstruction: systemPrompt,
