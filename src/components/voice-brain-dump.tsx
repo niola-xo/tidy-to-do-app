@@ -594,11 +594,7 @@ export function VoiceBrainDump({
               <textarea
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value.slice(0, 5000))}
-                placeholder={
-                  isSpeechSupported && !permissionDenied
-                    ? 'Start speaking or type/paste your thoughts here...'
-                    : 'Type or paste your thoughts here (e.g., "Need to email Sarah about project proposal tomorrow, and buy milk and eggs")...'
-                }
+                placeholder="I need to submit the tax report by Friday and review the client contract for work tomorrow. Also remind me to buy groceries like almond milk and apples, and schedule a haircut for Saturday."
                 rows={5}
                 className="w-full flex-1 min-h-[140px] p-3.5 rounded-xl border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-sans leading-relaxed"
               />
