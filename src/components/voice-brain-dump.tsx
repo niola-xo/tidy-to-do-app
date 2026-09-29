@@ -82,7 +82,10 @@ export function VoiceBrainDump({
   const [proposedSpaces, setProposedSpaces] = useState<ProposedSpace[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [interimText, setInterimText] = useState('');
+
   const recognitionRef = useRef<any>(null);
+  const shouldListenRef = useRef(false);
 
   // Initialize Web Speech API
   useEffect(() => {
@@ -102,6 +105,7 @@ export function VoiceBrainDump({
       stopListening();
       setStage('record');
       setTranscript('');
+      setInterimText('');
       setOrganizeError(null);
       setProposedSpaces([]);
     }
@@ -116,9 +120,15 @@ export function VoiceBrainDump({
       return;
     }
 
+    shouldListenRef.current = true;
+    setIsListening(true);
+    setPermissionDenied(false);
+
     try {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
       }
 
       const recognition = new SpeechRecognition();
@@ -128,22 +138,44 @@ export function VoiceBrainDump({
 
       recognition.onstart = () => {
         setIsListening(true);
-        setPermissionDenied(false);
       };
 
       recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
+        // 'no-speech' happens naturally when the speaker pauses.
+        // Do NOT stop listening; onend will automatically keep recognition alive!
+        if (event.error === 'no-speech') {
+          return;
+        }
+
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          shouldListenRef.current = false;
+          setIsListening(false);
           setPermissionDenied(true);
           toast.error('Microphone access denied. You can type or paste below.');
-        } else {
-          toast.error(`Voice error: ${event.error}`);
+          return;
         }
-        setIsListening(false);
+
+        console.warn('Speech recognition notice:', event.error);
       };
 
       recognition.onend = () => {
-        setIsListening(false);
+        // If user hasn't explicitly paused, auto-restart so natural pauses don't cut them off
+        if (shouldListenRef.current) {
+          try {
+            recognition.start();
+          } catch (e) {
+            setTimeout(() => {
+              if (shouldListenRef.current) {
+                try {
+                  recognition.start();
+                } catch (err) {}
+              }
+            }, 120);
+          }
+        } else {
+          setIsListening(false);
+          setInterimText('');
+        }
       };
 
       recognition.onresult = (event: any) => {
@@ -159,10 +191,15 @@ export function VoiceBrainDump({
           }
         }
 
-        setTranscript((prev) => {
-          const updated = (prev + ' ' + finalChunk).replace(/\s+/g, ' ').trim();
-          return updated.slice(0, 5000);
-        });
+        setInterimText(interimChunk);
+
+        if (finalChunk.trim()) {
+          setTranscript((prev) => {
+            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+            const combined = (prev + separator + finalChunk.trim()).replace(/\s+/g, ' ');
+            return combined.slice(0, 5000);
+          });
+        }
       };
 
       recognitionRef.current = recognition;
@@ -170,10 +207,13 @@ export function VoiceBrainDump({
     } catch (err: any) {
       console.error('Failed to start speech recognition:', err);
       setIsListening(false);
+      shouldListenRef.current = false;
     }
   };
 
   const stopListening = () => {
+    shouldListenRef.current = false;
+    setInterimText('');
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -598,6 +638,12 @@ export function VoiceBrainDump({
                 rows={5}
                 className="w-full flex-1 min-h-[140px] p-3.5 rounded-xl border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-sans leading-relaxed"
               />
+              {interimText && (
+                <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 text-xs">
+                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping" />
+                  <span className="italic truncate">Listening: &ldquo;{interimText}&rdquo;</span>
+                </div>
+              )}
             </div>
 
             {organizeError && (
