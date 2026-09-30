@@ -103,14 +103,21 @@ You MUST respond with pure JSON conforming to this schema:
 
     const prompt = `Please organize this voice brain dump transcript into structured spaces, lists, and tasks:\n\n"""\n${transcript}\n"""`;
 
-    // Attempt generation with retry mechanism
+    const CANDIDATE_MODELS = [
+      'gemini-flash-lite-latest',
+      'gemini-flash-latest',
+      'gemini-3.7-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.8-flash',
+    ];
+
     let result: OrganizeResponse | null = null;
     let lastError: Error | null = null;
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (const model of CANDIDATE_MODELS) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model,
           contents: prompt,
           config: {
             systemInstruction: systemPrompt,
@@ -122,10 +129,11 @@ You MUST respond with pure JSON conforming to this schema:
         const parsedJson = JSON.parse(rawText);
         const validated = OrganizeResponseSchema.parse(parsedJson);
         result = validated;
+        console.log(`Successfully organized tasks with model: ${model}`);
         break; // Succeeded
       } catch (err: any) {
         lastError = err;
-        console.warn(`Attempt ${attempt} to parse Gemini output failed:`, err?.message);
+        console.warn(`Model ${model} failed (${err?.status || err?.message}), trying fallback...`);
       }
     }
 
