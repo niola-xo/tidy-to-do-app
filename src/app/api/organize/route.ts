@@ -77,6 +77,7 @@ Strict Rules:
 9. If a task or space assignment is ambiguous (e.g. could be work or personal), choose the most likely space and set "low_confidence": true. Otherwise set "low_confidence": false.
 10. Preserve the user's meaning exactly. NEVER fabricate or hallucinate tasks that were not mentioned.
 11. If the transcript has no actionable tasks at all, return an empty spaces array: {"spaces": []}.
+12. The transcript was captured using voice recognition. It may contain phonetic misspellings, slightly misheard words, or missing grammatical prepositions. Use intelligent contextual reasoning to reconstruct the intended tasks accurately without altering the user's core intent.
 
 Output Format:
 You MUST respond with pure JSON conforming to this schema:

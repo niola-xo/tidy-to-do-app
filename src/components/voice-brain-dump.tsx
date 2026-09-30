@@ -145,10 +145,11 @@ export function VoiceBrainDump({
         /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
       const recognition = new SpeechRecognition();
-      // On Android/mobile, continuous mode causes duplicate buffer looping; rely on auto-restart instead
+      // On mobile, single phrase mode avoids buffer repetition; on desktop, continuous mode keeps mic open
       recognition.continuous = !isMobile;
       recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      // Use user's local browser language and dialect (e.g. en-GB, en-NG, en-US) for maximum phonetic accuracy
+      recognition.lang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en-US';
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -171,7 +172,7 @@ export function VoiceBrainDump({
       };
 
       recognition.onend = () => {
-        // If user hasn't explicitly paused, lock in current text and auto-restart seamlessly
+        // If user hasn't explicitly paused, auto-restart seamlessly
         if (shouldListenRef.current) {
           baseTranscriptRef.current = currentTranscriptRef.current.trim();
           try {
@@ -183,7 +184,7 @@ export function VoiceBrainDump({
                   recognition.start();
                 } catch (err) {}
               }
-            }, 80);
+            }, 60);
           }
         } else {
           setIsListening(false);
@@ -192,24 +193,24 @@ export function VoiceBrainDump({
       };
 
       recognition.onresult = (event: any) => {
-        let sessionText = '';
+        let interim = '';
 
-        if (isMobile) {
-          // On Android Chrome, the latest result in event.results contains the full revised phrase
-          const lastResult = event.results[event.results.length - 1];
-          sessionText = lastResult ? lastResult[0].transcript : '';
-        } else {
-          for (let i = 0; i < event.results.length; i++) {
-            sessionText += event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              sessionText += ' ';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (res.isFinal) {
+            const piece = res[0].transcript.trim();
+            if (piece) {
+              const base = baseTranscriptRef.current;
+              baseTranscriptRef.current = (base ? base + ' ' : '') + piece;
             }
+          } else {
+            interim += res[0].transcript;
           }
         }
 
         const base = baseTranscriptRef.current;
-        const separator = base && sessionText.trim() ? ' ' : '';
-        const combined = (base + separator + sessionText).replace(/\s+/g, ' ').trim();
+        const separator = base && interim.trim() ? ' ' : '';
+        const combined = (base + separator + interim).replace(/\s+/g, ' ').trim();
 
         setTranscript(combined.slice(0, 5000));
         currentTranscriptRef.current = combined.slice(0, 5000);
