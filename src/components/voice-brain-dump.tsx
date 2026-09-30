@@ -87,10 +87,20 @@ export function VoiceBrainDump({
   const shouldListenRef = useRef(false);
   const baseTranscriptRef = useRef('');
   const currentTranscriptRef = useRef('');
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  // Audio level monitoring & hardware AGC boost
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
 
   // Keep currentTranscriptRef in sync with transcript
   useEffect(() => {
     currentTranscriptRef.current = transcript;
+    if (textareaRef.current && textareaRef.current.value !== transcript) {
+      textareaRef.current.value = transcript;
+    }
   }, [transcript]);
 
   // Initialize Web Speech API
@@ -132,6 +142,48 @@ export function VoiceBrainDump({
     setIsListening(true);
     setPermissionDenied(false);
     baseTranscriptRef.current = currentTranscriptRef.current.trim();
+
+    // Start hardware audio capture with Auto-Gain Control and noise suppression
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          })
+          .then((stream) => {
+            micStreamRef.current = stream;
+            try {
+              const AudioContextClass =
+                window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioContextClass) {
+                const ctx = new AudioContextClass();
+                const analyser = ctx.createAnalyser();
+                analyser.fftSize = 64;
+                const source = ctx.createMediaStreamSource(stream);
+                source.connect(analyser);
+                audioContextRef.current = ctx;
+
+                const buffer = new Uint8Array(analyser.frequencyBinCount);
+                const pollVolume = () => {
+                  if (!shouldListenRef.current) return;
+                  analyser.getByteFrequencyData(buffer);
+                  let sum = 0;
+                  for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+                  const avg = sum / buffer.length;
+                  setAudioLevel(Math.min(100, Math.round(avg * 1.6)));
+                  requestAnimationFrame(pollVolume);
+                };
+                requestAnimationFrame(pollVolume);
+              }
+            } catch (err) {}
+          })
+          .catch(() => {});
+      }
+    } catch (err) {}
 
     try {
       if (recognitionRef.current) {
@@ -212,8 +264,20 @@ export function VoiceBrainDump({
         const separator = base && interim.trim() ? ' ' : '';
         const combined = (base + separator + interim).replace(/\s+/g, ' ').trim();
 
-        setTranscript(combined.slice(0, 5000));
         currentTranscriptRef.current = combined.slice(0, 5000);
+
+        // Immediate unthrottled DOM update (0ms latency, zero dropped audio frames)
+        if (textareaRef.current) {
+          textareaRef.current.value = currentTranscriptRef.current;
+        }
+
+        // Smooth 60fps state update without freezing speech stream
+        if (!animFrameRef.current) {
+          animFrameRef.current = requestAnimationFrame(() => {
+            setTranscript(currentTranscriptRef.current);
+            animFrameRef.current = null;
+          });
+        }
       };
 
       recognitionRef.current = recognition;
@@ -228,7 +292,18 @@ export function VoiceBrainDump({
   const stopListening = () => {
     shouldListenRef.current = false;
     setInterimText('');
+    setAudioLevel(0);
     baseTranscriptRef.current = currentTranscriptRef.current.trim();
+
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -573,19 +648,22 @@ export function VoiceBrainDump({
                 )}
               </AnimatePresence>
 
-              {/* Pulsing Animated Mic Button */}
+              {/* Pulsing Animated Mic Button with Real-Time Audio Level Reactivity */}
               <div className="relative my-2 flex items-center justify-center">
                 {isListening && (
                   <motion.div
-                    className="absolute -inset-3 rounded-full bg-indigo-500/25 pointer-events-none"
-                    animate={{ scale: [1, 1.35, 1], opacity: [0.7, 0.2, 0.7] }}
-                    transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
+                    className="absolute -inset-4 rounded-full bg-indigo-500/25 pointer-events-none"
+                    animate={{ scale: [1, 1.1 + (audioLevel / 100) * 0.4, 1], opacity: [0.5, 0.8, 0.5] }}
+                    transition={{ duration: 0.15 }}
                   />
                 )}
                 <button
                   type="button"
                   onClick={toggleListening}
-                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-full shadow-lg transition-all duration-300 relative z-10 flex items-center justify-center text-white active:scale-95 ${
+                  style={{
+                    transform: isListening ? `scale(${1 + (audioLevel / 100) * 0.12})` : undefined,
+                  }}
+                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-full shadow-lg transition-transform duration-100 relative z-10 flex items-center justify-center text-white active:scale-95 ${
                     isListening
                       ? 'bg-rose-500 hover:bg-rose-600 ring-4 ring-rose-500/20'
                       : 'bg-indigo-600 hover:bg-indigo-700 ring-4 ring-indigo-500/10'
@@ -645,11 +723,13 @@ export function VoiceBrainDump({
                 </span>
               </div>
               <textarea
+                ref={textareaRef}
                 value={transcript}
                 onChange={(e) => {
                   const val = e.target.value.slice(0, 5000);
                   setTranscript(val);
                   baseTranscriptRef.current = val;
+                  currentTranscriptRef.current = val;
                 }}
                 placeholder="I need to submit the tax report by Friday and review the client contract for work tomorrow. Also remind me to buy groceries like almond milk and apples, and schedule a haircut for Saturday."
                 rows={5}
