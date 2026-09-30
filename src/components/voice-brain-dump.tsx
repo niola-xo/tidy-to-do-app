@@ -24,7 +24,6 @@ import {
   ArrowRight,
   CheckCircle2,
   X,
-  Volume2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -58,6 +57,41 @@ interface VoiceBrainDumpProps {
   onSaved: () => Promise<void>;
 }
 
+function appendNonOverlapping(base: string, addition: string): string {
+  base = (base || '').trim();
+  addition = (addition || '').trim();
+  if (!base) return addition;
+  if (!addition) return base;
+
+  const baseLower = base.toLowerCase();
+  const addLower = addition.toLowerCase();
+
+  // Exact duplicate or base already ends with addition
+  if (baseLower === addLower || baseLower.endsWith(addLower)) {
+    return base;
+  }
+  // Addition already starts with base (addition is full superset)
+  if (addLower.startsWith(baseLower)) {
+    return addition;
+  }
+
+  // Token-level overlap detection (up to 20 words)
+  const bWords = base.split(/\s+/);
+  const aWords = addition.split(/\s+/);
+  const maxCheck = Math.min(bWords.length, aWords.length, 20);
+
+  for (let i = maxCheck; i > 0; i--) {
+    const bTail = bWords.slice(-i).map((w) => w.toLowerCase().replace(/[^\w]/g, '')).join(' ');
+    const aHead = aWords.slice(0, i).map((w) => w.toLowerCase().replace(/[^\w]/g, '')).join(' ');
+    if (bTail && bTail === aHead) {
+      const remaining = aWords.slice(i).join(' ');
+      return remaining ? base + ' ' + remaining : base;
+    }
+  }
+
+  return base + ' ' + addition;
+}
+
 export function VoiceBrainDump({
   isOpen,
   onClose,
@@ -85,23 +119,8 @@ export function VoiceBrainDump({
 
   const recognitionRef = useRef<any>(null);
   const shouldListenRef = useRef(false);
-  const baseTranscriptRef = useRef('');
-  const currentTranscriptRef = useRef('');
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-
-  // Audio level monitoring & hardware AGC boost
-  const [audioLevel, setAudioLevel] = useState(0);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-
-  // Keep currentTranscriptRef in sync with transcript
-  useEffect(() => {
-    currentTranscriptRef.current = transcript;
-    if (textareaRef.current && textareaRef.current.value !== transcript) {
-      textareaRef.current.value = transcript;
-    }
-  }, [transcript]);
+  const sessionBaseRef = useRef('');
+  const lastSessionFinalRef = useRef('');
 
   // Initialize Web Speech API
   useEffect(() => {
@@ -122,8 +141,8 @@ export function VoiceBrainDump({
       setStage('record');
       setTranscript('');
       setInterimText('');
-      baseTranscriptRef.current = '';
-      currentTranscriptRef.current = '';
+      sessionBaseRef.current = '';
+      lastSessionFinalRef.current = '';
       setOrganizeError(null);
       setProposedSpaces([]);
     }
@@ -141,49 +160,10 @@ export function VoiceBrainDump({
     shouldListenRef.current = true;
     setIsListening(true);
     setPermissionDenied(false);
-    baseTranscriptRef.current = currentTranscriptRef.current.trim();
 
-    // Start hardware audio capture with Auto-Gain Control and noise suppression
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices
-          .getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-          })
-          .then((stream) => {
-            micStreamRef.current = stream;
-            try {
-              const AudioContextClass =
-                window.AudioContext || (window as any).webkitAudioContext;
-              if (AudioContextClass) {
-                const ctx = new AudioContextClass();
-                const analyser = ctx.createAnalyser();
-                analyser.fftSize = 64;
-                const source = ctx.createMediaStreamSource(stream);
-                source.connect(analyser);
-                audioContextRef.current = ctx;
-
-                const buffer = new Uint8Array(analyser.frequencyBinCount);
-                const pollVolume = () => {
-                  if (!shouldListenRef.current) return;
-                  analyser.getByteFrequencyData(buffer);
-                  let sum = 0;
-                  for (let i = 0; i < buffer.length; i++) sum += buffer[i];
-                  const avg = sum / buffer.length;
-                  setAudioLevel(Math.min(100, Math.round(avg * 1.6)));
-                  requestAnimationFrame(pollVolume);
-                };
-                requestAnimationFrame(pollVolume);
-              }
-            } catch (err) {}
-          })
-          .catch(() => {});
-      }
-    } catch (err) {}
+    // Save existing text as base before this session begins
+    sessionBaseRef.current = transcript.trim();
+    lastSessionFinalRef.current = '';
 
     try {
       if (recognitionRef.current) {
@@ -192,16 +172,13 @@ export function VoiceBrainDump({
         } catch (e) {}
       }
 
-      const isMobile =
-        typeof navigator !== 'undefined' &&
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
       const recognition = new SpeechRecognition();
-      // On mobile, single phrase mode avoids buffer repetition; on desktop, continuous mode keeps mic open
-      recognition.continuous = !isMobile;
+      recognition.continuous = true;
       recognition.interimResults = true;
-      // Use user's local browser language and dialect (e.g. en-GB, en-NG, en-US) for maximum phonetic accuracy
-      recognition.lang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en-US';
+      recognition.lang =
+        typeof navigator !== 'undefined' && navigator.language
+          ? navigator.language
+          : 'en-US';
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -224,9 +201,18 @@ export function VoiceBrainDump({
       };
 
       recognition.onend = () => {
-        // If user hasn't explicitly paused, auto-restart seamlessly
+        // Commit whatever final text was recognized in this session
+        if (lastSessionFinalRef.current) {
+          sessionBaseRef.current = appendNonOverlapping(
+            sessionBaseRef.current,
+            lastSessionFinalRef.current
+          );
+          lastSessionFinalRef.current = '';
+        }
+        setInterimText('');
+
         if (shouldListenRef.current) {
-          baseTranscriptRef.current = currentTranscriptRef.current.trim();
+          // Restart immediately to keep capturing continuously
           try {
             recognition.start();
           } catch (e) {
@@ -236,48 +222,38 @@ export function VoiceBrainDump({
                   recognition.start();
                 } catch (err) {}
               }
-            }, 60);
+            }, 50);
           }
         } else {
           setIsListening(false);
-          setInterimText('');
+          setTranscript(sessionBaseRef.current);
         }
       };
 
       recognition.onresult = (event: any) => {
-        let interim = '';
+        let sessionFinal = '';
+        let sessionInterim = '';
 
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const res = event.results[i];
-          if (res.isFinal) {
-            const piece = res[0].transcript.trim();
-            if (piece) {
-              const base = baseTranscriptRef.current;
-              baseTranscriptRef.current = (base ? base + ' ' : '') + piece;
-            }
+        for (let i = 0; i < event.results.length; i++) {
+          const item = event.results[i];
+          const text = item[0]?.transcript || '';
+          if (item.isFinal) {
+            sessionFinal = sessionFinal ? sessionFinal + ' ' + text.trim() : text.trim();
           } else {
-            interim += res[0].transcript;
+            sessionInterim = sessionInterim ? sessionInterim + ' ' + text.trim() : text.trim();
           }
         }
 
-        const base = baseTranscriptRef.current;
-        const separator = base && interim.trim() ? ' ' : '';
-        const combined = (base + separator + interim).replace(/\s+/g, ' ').trim();
+        lastSessionFinalRef.current = sessionFinal;
 
-        currentTranscriptRef.current = combined.slice(0, 5000);
+        const committed = appendNonOverlapping(sessionBaseRef.current, sessionFinal);
+        const fullDisplay = sessionInterim
+          ? (committed ? committed + ' ' + sessionInterim : sessionInterim)
+          : committed;
 
-        // Immediate unthrottled DOM update (0ms latency, zero dropped audio frames)
-        if (textareaRef.current) {
-          textareaRef.current.value = currentTranscriptRef.current;
-        }
-
-        // Smooth 60fps state update without freezing speech stream
-        if (!animFrameRef.current) {
-          animFrameRef.current = requestAnimationFrame(() => {
-            setTranscript(currentTranscriptRef.current);
-            animFrameRef.current = null;
-          });
-        }
+        const sliced = fullDisplay.slice(0, 5000);
+        setTranscript(sliced);
+        setInterimText(sessionInterim);
       };
 
       recognitionRef.current = recognition;
@@ -292,17 +268,6 @@ export function VoiceBrainDump({
   const stopListening = () => {
     shouldListenRef.current = false;
     setInterimText('');
-    setAudioLevel(0);
-    baseTranscriptRef.current = currentTranscriptRef.current.trim();
-
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
 
     if (recognitionRef.current) {
       try {
@@ -310,6 +275,16 @@ export function VoiceBrainDump({
       } catch (e) {}
       recognitionRef.current = null;
     }
+
+    if (lastSessionFinalRef.current) {
+      sessionBaseRef.current = appendNonOverlapping(
+        sessionBaseRef.current,
+        lastSessionFinalRef.current
+      );
+      lastSessionFinalRef.current = '';
+    }
+
+    setTranscript(sessionBaseRef.current);
     setIsListening(false);
   };
 
@@ -648,25 +623,29 @@ export function VoiceBrainDump({
                 )}
               </AnimatePresence>
 
-              {/* Pulsing Animated Mic Button with Real-Time Audio Level Reactivity */}
+              {/* Pulsing Animated Mic Button with Zero-Lag CSS Pulsing */}
               <div className="relative my-2 flex items-center justify-center">
                 {isListening && (
-                  <motion.div
-                    className="absolute -inset-4 rounded-full bg-indigo-500/25 pointer-events-none"
-                    animate={{ scale: [1, 1.1 + (audioLevel / 100) * 0.4, 1], opacity: [0.5, 0.8, 0.5] }}
-                    transition={{ duration: 0.15 }}
-                  />
+                  <>
+                    <motion.div
+                      className="absolute -inset-4 rounded-full bg-rose-500/25 pointer-events-none"
+                      animate={{ scale: [1, 1.25, 1], opacity: [0.3, 0.7, 0.3] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                    <motion.div
+                      className="absolute -inset-8 rounded-full bg-rose-500/10 pointer-events-none"
+                      animate={{ scale: [1, 1.35, 1], opacity: [0.1, 0.4, 0.1] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
+                    />
+                  </>
                 )}
                 <button
                   type="button"
                   onClick={toggleListening}
-                  style={{
-                    transform: isListening ? `scale(${1 + (audioLevel / 100) * 0.12})` : undefined,
-                  }}
-                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-full shadow-lg transition-transform duration-100 relative z-10 flex items-center justify-center text-white active:scale-95 ${
+                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-full shadow-lg relative z-10 flex items-center justify-center text-white active:scale-95 transition-all duration-200 ${
                     isListening
-                      ? 'bg-rose-500 hover:bg-rose-600 ring-4 ring-rose-500/20'
-                      : 'bg-indigo-600 hover:bg-indigo-700 ring-4 ring-indigo-500/10'
+                      ? 'bg-rose-500 hover:bg-rose-600 ring-4 ring-rose-500/30 shadow-rose-500/25'
+                      : 'bg-indigo-600 hover:bg-indigo-700 ring-4 ring-indigo-500/10 shadow-indigo-500/20'
                   }`}
                 >
                   {isListening ? (
@@ -723,13 +702,12 @@ export function VoiceBrainDump({
                 </span>
               </div>
               <textarea
-                ref={textareaRef}
                 value={transcript}
                 onChange={(e) => {
                   const val = e.target.value.slice(0, 5000);
                   setTranscript(val);
-                  baseTranscriptRef.current = val;
-                  currentTranscriptRef.current = val;
+                  sessionBaseRef.current = val;
+                  lastSessionFinalRef.current = '';
                 }}
                 placeholder="I need to submit the tax report by Friday and review the client contract for work tomorrow. Also remind me to buy groceries like almond milk and apples, and schedule a haircut for Saturday."
                 rows={5}
@@ -919,7 +897,8 @@ export function VoiceBrainDump({
                 size="sm"
                 onClick={() => {
                   setTranscript('');
-                  baseTranscriptRef.current = '';
+                  sessionBaseRef.current = '';
+                  lastSessionFinalRef.current = '';
                   stopListening();
                 }}
                 disabled={!transcript || isOrganizing}
