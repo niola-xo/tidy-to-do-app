@@ -140,8 +140,13 @@ export function VoiceBrainDump({
         } catch (e) {}
       }
 
+      const isMobile =
+        typeof navigator !== 'undefined' &&
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
       const recognition = new SpeechRecognition();
-      recognition.continuous = true;
+      // On Android/mobile, continuous mode causes duplicate buffer looping; rely on auto-restart instead
+      recognition.continuous = !isMobile;
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
@@ -178,7 +183,7 @@ export function VoiceBrainDump({
                   recognition.start();
                 } catch (err) {}
               }
-            }, 100);
+            }, 80);
           }
         } else {
           setIsListening(false);
@@ -189,10 +194,16 @@ export function VoiceBrainDump({
       recognition.onresult = (event: any) => {
         let sessionText = '';
 
-        for (let i = 0; i < event.results.length; i++) {
-          sessionText += event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            sessionText += ' ';
+        if (isMobile) {
+          // On Android Chrome, the latest result in event.results contains the full revised phrase
+          const lastResult = event.results[event.results.length - 1];
+          sessionText = lastResult ? lastResult[0].transcript : '';
+        } else {
+          for (let i = 0; i < event.results.length; i++) {
+            sessionText += event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              sessionText += ' ';
+            }
           }
         }
 
