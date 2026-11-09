@@ -112,7 +112,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden rounded-2xl gap-0 border border-border/80 shadow-2xl">
+      <DialogContent className="w-full sm:max-w-2xl p-0 overflow-hidden rounded-2xl gap-0 border border-border/80 shadow-2xl">
         <DialogHeader className="p-6 pb-4 border-b border-border/60 bg-muted/20">
           <DialogTitle className="flex items-center gap-2.5 text-xl font-bold tracking-tight">
             <Settings className="h-5 w-5 text-primary" />
