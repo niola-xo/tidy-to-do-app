@@ -7,8 +7,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
+    DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
@@ -20,11 +19,9 @@ import {
   Plus,
   AlertCircle,
   Calendar,
-  Flag,
-  ArrowRight,
-  CheckCircle2,
-  X,
-} from 'lucide-react';
+  Clock,
+      CheckCircle2,
+  } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { createClient } from '@/utils/supabase/client';
@@ -33,6 +30,7 @@ export type ProposedTask = {
   id: string;
   text: string;
   due_date?: string | null;
+  due_time?: string | null;
   priority?: 'low' | 'medium' | 'high' | null;
   low_confidence?: boolean;
 };
@@ -350,6 +348,7 @@ export function VoiceBrainDump({
             id: `task-${spIdx}-${lsIdx}-${tIdx}-${Date.now()}`,
             text: t.text,
             due_date: t.due_date || null,
+            due_time: t.due_time || null,
             priority: t.priority || null,
             low_confidence: Boolean(t.low_confidence),
           })),
@@ -380,6 +379,19 @@ export function VoiceBrainDump({
     setProposedSpaces((prev) => {
       const clone = [...prev];
       clone[spaceIdx].lists[listIdx].tasks[taskIdx].due_date = newDate || null;
+      return clone;
+    });
+  };
+
+  const updateTaskDueTime = (
+    spaceIdx: number,
+    listIdx: number,
+    taskIdx: number,
+    newTime: string
+  ) => {
+    setProposedSpaces((prev) => {
+      const clone = [...prev];
+      clone[spaceIdx].lists[listIdx].tasks[taskIdx].due_time = newTime || null;
       return clone;
     });
   };
@@ -439,6 +451,7 @@ export function VoiceBrainDump({
         id: `task-manual-${Date.now()}`,
         text: 'New task',
         due_date: null,
+        due_time: null,
         priority: null,
         low_confidence: false,
       });
@@ -504,7 +517,7 @@ export function VoiceBrainDump({
     try {
       // 1. Ensure spaces exist or create them
       for (const sp of proposedSpaces) {
-        let spaceRecord = existingSpaces.find(
+        const spaceRecord = existingSpaces.find(
           (s) => s.name.toLowerCase() === sp.space_name.toLowerCase()
         );
 
@@ -827,6 +840,20 @@ export function VoiceBrainDump({
                                     updateTaskDueDate(spIdx, lsIdx, tIdx, e.target.value)
                                   }
                                   className="bg-transparent text-xs text-foreground focus:outline-none"
+                                />
+                              </div>
+
+                              {/* Due Time selector (Phase 3.5) */}
+                              <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md text-xs">
+                                <Clock className="h-3 w-3 text-muted-foreground" />
+                                <input
+                                  type="time"
+                                  value={t.due_time ? t.due_time.slice(0, 5) : ''}
+                                  onChange={(e) =>
+                                    updateTaskDueTime(spIdx, lsIdx, tIdx, e.target.value)
+                                  }
+                                  className="bg-transparent text-xs text-foreground focus:outline-none"
+                                  title="Set time (leave blank for all-day)"
                                 />
                               </div>
 

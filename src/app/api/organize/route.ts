@@ -5,6 +5,7 @@ import { z } from 'zod';
 const TaskItemSchema = z.object({
   text: z.string().min(1, 'Task text cannot be empty'),
   due_date: z.string().nullable().optional(),
+  due_time: z.string().nullable().optional(),
   priority: z.enum(['low', 'medium', 'high']).nullable().optional(),
   low_confidence: z.boolean().default(false),
 });
@@ -73,11 +74,12 @@ Strict Rules:
 5. NEVER mix work and personal tasks in the same list.
 6. Group related tasks inside a space into 1 or more lists with clear, short titles (e.g. "Dentist & Health", "Client Launch Prep", "Groceries").
 7. Detect due dates and urgency strictly when explicitly stated (e.g. "tomorrow", "by Friday", "next Monday"). Use today's date (${today}) to resolve relative dates to YYYY-MM-DD format. If no date is stated, leave due_date as null. NEVER invent dates.
-8. Detect priority if stated: "urgent", "asap", "critical" -> "high"; "standard", "normal" -> "medium"; "sometime", "low priority" -> "low". If not stated, priority is null.
-9. If a task or space assignment is ambiguous (e.g. could be work or personal), choose the most likely space and set "low_confidence": true. Otherwise set "low_confidence": false.
-10. Preserve the user's meaning exactly. NEVER fabricate or hallucinate tasks that were not mentioned.
-11. If the transcript has no actionable tasks at all, return an empty spaces array: {"spaces": []}.
-12. The transcript was captured using voice recognition. It may contain phonetic misspellings, slightly misheard words, or missing grammatical prepositions. Use intelligent contextual reasoning to reconstruct the intended tasks accurately without altering the user's core intent.
+8. Detect due times strictly when explicitly stated (e.g. "at 3pm", "by noon", "at 9:30 in the morning"). Format due_time as 24-hour HH:mm (e.g. "15:00", "12:00", "09:30"). If no time is stated or if it is an all-day task, leave due_time as null. NEVER invent times.
+9. Detect priority if stated: "urgent", "asap", "critical" -> "high"; "standard", "normal" -> "medium"; "sometime", "low priority" -> "low". If not stated, priority is null.
+10. If a task or space assignment is ambiguous (e.g. could be work or personal), choose the most likely space and set "low_confidence": true. Otherwise set "low_confidence": false.
+11. Preserve the user's meaning exactly. NEVER fabricate or hallucinate tasks that were not mentioned.
+12. If the transcript has no actionable tasks at all, return an empty spaces array: {"spaces": []}.
+13. The transcript was captured using voice recognition. It may contain phonetic misspellings, slightly misheard words, or missing grammatical prepositions. Use intelligent contextual reasoning to reconstruct the intended tasks accurately without altering the user's core intent.
 
 Output Format:
 You MUST respond with pure JSON conforming to this schema:
@@ -92,6 +94,7 @@ You MUST respond with pure JSON conforming to this schema:
             {
               "text": "Send final proposal to Acme",
               "due_date": "2026-10-02",
+              "due_time": "15:00",
               "priority": "high",
               "low_confidence": false
             }
@@ -132,9 +135,11 @@ You MUST respond with pure JSON conforming to this schema:
         result = validated;
         console.log(`Successfully organized tasks with model: ${model}`);
         break; // Succeeded
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${model} failed (${err?.status || err?.message}), trying fallback...`);
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const errStatus = (err as { status?: number })?.status;
+        console.warn(`Model ${model} failed (${errStatus || errMsg}), trying fallback...`);
       }
     }
 
@@ -151,10 +156,11 @@ You MUST respond with pure JSON conforming to this schema:
     }
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error in /api/organize:', error);
+    const message = error instanceof Error ? error.message : 'Internal server error while organizing voice note';
     return NextResponse.json(
-      { error: error?.message || 'Internal server error while organizing voice note' },
+      { error: message },
       { status: 500 }
     );
   }

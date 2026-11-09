@@ -5,7 +5,6 @@ import { createClient } from '@/utils/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
   Dialog,
@@ -15,7 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Menu, Plus, Trash2, LogOut, Sun, Moon, GripVertical, Pencil, Check, X, Mic, Sparkles } from 'lucide-react';
+import { Menu, Plus, Trash2, LogOut, Sun, Moon, GripVertical, Pencil, Check, X, Mic, Sparkles, Calendar, Clock, Download } from 'lucide-react';
+import { createGoogleCalendarUrl, generateIcs, downloadIcsFile } from '@/utils/calendar';
 import { VoiceBrainDump } from '@/components/voice-brain-dump';
 import { useTheme } from 'next-themes';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -42,7 +42,18 @@ import { CSS } from '@dnd-kit/utilities';
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Space = { id: string; name: string; color: string };
 type List = { id: string; space_id: string; title: string };
-type Task = { id: string; list_id: string | null; space_id: string; text: string; is_done: boolean; position: number };
+type Task = {
+  id: string;
+  list_id: string | null;
+  space_id: string;
+  text: string;
+  is_done: boolean;
+  position: number;
+  due_date?: string | null;
+  due_time?: string | null;
+  priority?: 'low' | 'medium' | 'high' | null;
+  note?: string | null;
+};
 
 // ─── Accent colours per space ─────────────────────────────────────────────
 const ACCENT_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
@@ -56,20 +67,63 @@ const ACCENT_COLORS: Record<string, { bg: string; text: string; ring: string }> 
 const SPACE_COLORS = Object.keys(ACCENT_COLORS);
 const getAccent = (color: string) => ACCENT_COLORS[color] ?? ACCENT_COLORS.gray;
 
+
+function formatDateDisplay(dateStr: string, timeStr?: string | null): string {
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    const month = dateObj.toLocaleDateString('en-US', { month: 'short' });
+    let res = `${month} ${d}`;
+    if (timeStr) {
+      const clean = timeStr.slice(0, 5);
+      const [hh, mm] = clean.split(':').map(Number);
+      const ampm = hh >= 12 ? 'PM' : 'AM';
+      const fH = hh % 12 || 12;
+      res += ` at ${fH}:${String(mm).padStart(2, '0')} ${ampm}`;
+    }
+    return res;
+  } catch {
+    return dateStr;
+  }
+}
+
 // ─── SortableTask ─────────────────────────────────────────────────────────
 function SortableTask({
   task,
+  spaceName,
+  listName,
   accent,
   onToggle,
   onDelete,
+  onUpdateTask,
 }: {
   task: Task;
+  spaceName?: string;
+  listName?: string;
   accent: typeof ACCENT_COLORS[string];
   onToggle: (t: Task) => void;
   onDelete: (task: Task) => void;
+  onUpdateTask?: (task: Task, updates: { text: string; due_date: string | null; due_time: string | null }) => Promise<void>;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(task.text);
+  const [editDueDate, setEditDueDate] = useState(task.due_date || '');
+  const [editDueTime, setEditDueTime] = useState(task.due_time ? task.due_time.slice(0, 5) : '');
+
+  const handleSave = async () => {
+    if (!editText.trim()) return;
+    if (onUpdateTask) {
+      await onUpdateTask(task, {
+      text: editText.trim(),
+      due_date: editDueDate || null,
+      due_time: editDueTime || null,
+    });
+    }
+    setIsEditing(false);
+  };
 
   return (
     <motion.div
@@ -89,17 +143,133 @@ function SortableTask({
         onCheckedChange={() => onToggle(task)}
         className={`shrink-0 ${task.is_done ? accent.ring : ''}`}
       />
-      <span className={`flex-1 text-sm transition-all ${task.is_done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-        {task.text}
-      </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => onDelete(task)}
-        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-      >
-        <Trash2 size={14} />
-      </Button>
+
+      {isEditing ? (
+        <div className="flex-1 flex flex-col gap-2 py-0.5">
+          <div className="flex items-center gap-2">
+            <Input
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              className="h-8 text-sm flex-1"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Escape') setIsEditing(false);
+              }}
+            />
+            <Button size="icon" variant="ghost" className="h-7 w-7 text-emerald-600 hover:text-emerald-700" onClick={handleSave}>
+              <Check size={14} />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => setIsEditing(false)}>
+              <X size={14} />
+            </Button>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md">
+              <Calendar className="h-3 w-3 text-muted-foreground" />
+              <input
+                type="date"
+                value={editDueDate}
+                onChange={(e) => setEditDueDate(e.target.value)}
+                className="bg-transparent text-xs text-foreground focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md">
+              <Clock className="h-3 w-3 text-muted-foreground" />
+              <input
+                type="time"
+                value={editDueTime}
+                onChange={(e) => setEditDueTime(e.target.value)}
+                className="bg-transparent text-xs text-foreground focus:outline-none"
+                title="Due time"
+              />
+            </div>
+            {(editDueDate || editDueTime) && (
+              <button
+                type="button"
+                onClick={() => { setEditDueDate(''); setEditDueTime(''); }}
+                className="text-[11px] text-muted-foreground hover:text-destructive underline"
+              >
+                Clear date/time
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <span
+            onClick={() => {
+              setEditText(task.text);
+              setEditDueDate(task.due_date || '');
+              setEditDueTime(task.due_time ? task.due_time.slice(0, 5) : '');
+              setIsEditing(true);
+            }}
+            className={`flex-1 text-sm cursor-pointer transition-all ${task.is_done ? 'line-through text-muted-foreground' : 'text-foreground hover:text-indigo-600 dark:hover:text-indigo-400'}`}
+            title="Click to edit task"
+          >
+            {task.text}
+          </span>
+
+          {/* Date & Time Chip + Prefilled Google Calendar 1-Click Link (AC5.2) */}
+          {task.due_date && (
+            <div className="flex items-center gap-1 shrink-0">
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
+                  task.is_done
+                    ? 'bg-muted text-muted-foreground'
+                    : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200/50 dark:border-indigo-800/50'
+                }`}
+              >
+                <Calendar className="h-3 w-3 shrink-0" />
+                <span>{formatDateDisplay(task.due_date, task.due_time)}</span>
+              </span>
+
+              <a
+                href={createGoogleCalendarUrl({
+                  title: task.text,
+                  date: task.due_date,
+                  time: task.due_time,
+                  spaceName,
+                  listName,
+                })}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
+                title="Add to Google Calendar"
+                aria-label="Add to Google Calendar"
+              >
+                <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+              </a>
+            </div>
+          )}
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              setEditText(task.text);
+              setEditDueDate(task.due_date || '');
+              setEditDueTime(task.due_time ? task.due_time.slice(0, 5) : '');
+              setIsEditing(true);
+            }}
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Edit task"
+          >
+            <Pencil size={13} />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onDelete(task)}
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+            title="Delete task"
+          >
+            <Trash2 size={14} />
+          </Button>
+        </>
+      )}
     </motion.div>
   );
 }
@@ -108,26 +278,33 @@ function SortableTask({
 function ListSection({
   list,
   tasks,
+  spaceName,
   accent,
   onToggle,
   onDeleteTask,
   onDeleteList,
   onRenameList,
   onAddTask,
+  onUpdateTask,
   sensors,
   onDragEnd,
 }: {
   list: List | null; // null = "no list" / default group
   tasks: Task[];
+  spaceName?: string;
   accent: typeof ACCENT_COLORS[string];
   onToggle: (t: Task) => void;
   onDeleteTask: (t: Task) => void;
   onDeleteList?: (l: List) => void;
   onRenameList?: (l: List, name: string) => void;
-  onAddTask: (text: string, listId: string | null) => void;
+  onAddTask: (text: string, listId: string | null, dueDate?: string | null, dueTime?: string | null) => void;
+  onUpdateTask: (task: Task, updates: { text: string; due_date: string | null; due_time: string | null }) => Promise<void>;
   sensors: ReturnType<typeof useSensors>;
   onDragEnd: (e: DragEndEvent, listId: string | null) => void;
 }) {
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [newDueDate, setNewDueDate] = useState('');
+  const [newDueTime, setNewDueTime] = useState('');
   const [newTask, setNewTask] = useState('');
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(list?.title ?? '');
@@ -136,8 +313,11 @@ function ListSection({
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTask.trim()) return;
-    onAddTask(newTask.trim(), list?.id ?? null);
+    onAddTask(newTask.trim(), list?.id ?? null, newDueDate || null, newDueTime || null);
     setNewTask('');
+    setNewDueDate('');
+    setNewDueTime('');
+    setShowDatePicker(false);
   };
 
   const handleRename = () => {
@@ -211,25 +391,70 @@ function ListSection({
           <div className="space-y-2">
             <AnimatePresence>
               {tasks.map(task => (
-                <SortableTask key={task.id} task={task} accent={accent} onToggle={onToggle} onDelete={onDeleteTask} />
+                <SortableTask key={task.id} task={task} spaceName={spaceName} listName={list?.title} accent={accent} onToggle={onToggle} onDelete={onDeleteTask} onUpdateTask={onUpdateTask} />
               ))}
             </AnimatePresence>
           </div>
         </SortableContext>
       </DndContext>
 
-      {/* Add task input */}
-      <form onSubmit={handleAdd} className="flex gap-2 mt-3">
-        <Input
-          ref={list === null ? inputRef : undefined}
-          placeholder={list ? `Add task to "${list.title}"…` : 'What needs to be done?'}
-          value={newTask}
-          onChange={e => setNewTask(e.target.value)}
-          className="flex-1 h-10 rounded-xl border-dashed focus:border-solid"
-        />
-        <Button type="submit" size="icon" className={`h-10 w-10 rounded-xl ${newTask.trim() ? accent.bg : ''}`} disabled={!newTask.trim()}>
-          <Plus size={18} />
-        </Button>
+            {/* Add task input */}
+      <form onSubmit={handleAdd} className="mt-3 flex flex-col gap-2">
+        <div className="flex gap-2">
+          <Input
+            ref={list === null ? inputRef : undefined}
+            placeholder={list ? `Add task to "${list.title}"…` : 'What needs to be done?'}
+            value={newTask}
+            onChange={e => setNewTask(e.target.value)}
+            className="flex-1 h-10 rounded-xl border-dashed focus:border-solid"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowDatePicker(!showDatePicker)}
+            className={`h-10 w-10 rounded-xl border ${showDatePicker || newDueDate ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/40 dark:border-indigo-800' : 'text-muted-foreground'}`}
+            title="Add due date & time"
+          >
+            <Calendar size={16} />
+          </Button>
+          <Button type="submit" size="icon" className={`h-10 w-10 rounded-xl ${newTask.trim() ? accent.bg : ''}`} disabled={!newTask.trim()}>
+            <Plus size={18} />
+          </Button>
+        </div>
+
+        {showDatePicker && (
+          <div className="flex items-center gap-2 px-1 text-xs">
+            <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md">
+              <Calendar className="h-3 w-3 text-muted-foreground" />
+              <input
+                type="date"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+                className="bg-transparent text-xs text-foreground focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md">
+              <Clock className="h-3 w-3 text-muted-foreground" />
+              <input
+                type="time"
+                value={newDueTime}
+                onChange={(e) => setNewDueTime(e.target.value)}
+                className="bg-transparent text-xs text-foreground focus:outline-none"
+                title="Due time (optional)"
+              />
+            </div>
+            {(newDueDate || newDueTime) && (
+              <button
+                type="button"
+                onClick={() => { setNewDueDate(''); setNewDueTime(''); }}
+                className="text-[11px] text-muted-foreground hover:text-destructive underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
       </form>
     </div>
   );
@@ -248,6 +473,7 @@ function Sidebar({
   theme,
   setTheme,
   onOpenVoice,
+  onOpenExport,
 }: {
   spaces: Space[];
   activeSpaceId: string | null;
@@ -260,6 +486,7 @@ function Sidebar({
   theme: string | undefined;
   setTheme: (t: string) => void;
   onOpenVoice: () => void;
+  onOpenExport: () => void;
 }) {
   return (
     <div className="flex flex-col h-full w-64 shrink-0 border-r bg-card px-3 py-4 gap-4">
@@ -277,6 +504,16 @@ function Sidebar({
           <span className="sr-only">Toggle theme</span>
         </Button>
       </div>
+
+
+      {/* Calendar Export Button */}
+      <button
+        onClick={onOpenExport}
+        className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-xl border border-border/80 bg-secondary/30 hover:bg-secondary text-foreground font-medium text-xs transition-colors"
+      >
+        <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+        <span>Export to calendar (.ics)</span>
+      </button>
 
       {/* Voice Brain Dump CTA Button */}
       <button
@@ -359,6 +596,8 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'space' | 'list'; item: Space | List } | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const { theme, setTheme } = useTheme();
   const supabase = createClient();
 
@@ -366,23 +605,6 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
-
-  // ── Init: get user, then load spaces
-  useEffect(() => {
-    if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
-      setUserId(user.id);
-      await loadSpaces(user.id);
-      setInitialized(true);
-    });
-  }, []);
-
-  // ── Load lists + tasks when space changes
-  useEffect(() => {
-    if (!activeSpaceId) return;
-    loadListsAndTasks(activeSpaceId);
-  }, [activeSpaceId]);
 
   const loadSpaces = useCallback(async (uid: string) => {
     const { data } = await supabase.from('spaces').select('*').eq('user_id', uid).order('created_at', { ascending: true });
@@ -411,6 +633,23 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
     setLists(listData ?? []);
     setTasks(taskData ?? []);
   }, []);
+
+  // ── Init: get user, then load spaces
+  useEffect(() => {
+    if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      setUserId(user.id);
+      await loadSpaces(user.id);
+      setInitialized(true);
+    });
+  }, [loadSpaces]);
+
+  // ── Load lists + tasks when space changes
+  useEffect(() => {
+    if (!activeSpaceId) return;
+    loadListsAndTasks(activeSpaceId);
+  }, [activeSpaceId, loadListsAndTasks]);
 
   // ── Space actions
   const createSpace = async (e: React.FormEvent) => {
@@ -474,16 +713,49 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
   };
 
   // ── Task actions
-  const addTask = async (text: string, listId: string | null) => {
+  const addTask = async (text: string, listId: string | null, dueDate?: string | null, dueTime?: string | null) => {
     if (!activeSpaceId || !userId) return;
     const position = tasks.filter(t => t.list_id === listId).length;
     const { data, error } = await supabase
       .from('tasks')
-      .insert({ text, list_id: listId, space_id: activeSpaceId, user_id: userId, position })
+      .insert({
+        text,
+        list_id: listId,
+        space_id: activeSpaceId,
+        user_id: userId,
+        position,
+        due_date: dueDate || null,
+        due_time: dueTime || null,
+      })
       .select()
       .single();
     if (error) { toast.error(error.message); return; }
     setTasks(prev => [...prev, data]);
+  };
+
+  const updateTask = async (
+    task: Task,
+    updates: { text: string; due_date: string | null; due_time: string | null }
+  ) => {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        text: updates.text,
+        due_date: updates.due_date,
+        due_time: updates.due_time,
+      })
+      .eq('id', task.id)
+      .select()
+      .single();
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    if (data) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? data : t)));
+      toast.success('Task updated');
+    }
   };
 
   const toggleTask = async (task: Task) => {
@@ -526,11 +798,77 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
     }
   };
 
+  // ── Calendar Export Handlers (Phase 3.5)
+  const handleExportCurrentSpace = () => {
+    if (!activeSpace) return;
+    const currentSpaceTasks = tasks.filter(
+      (t) => t.space_id === activeSpace.id && !t.is_done && t.due_date
+    );
+
+    if (currentSpaceTasks.length === 0) {
+      toast.info(`No incomplete dated tasks in "${activeSpace.name}".`);
+      return;
+    }
+
+    const icsContent = generateIcs({
+      tasks: currentSpaceTasks,
+      spaces,
+      lists,
+      timezone: 'Africa/Lagos',
+    });
+
+    const filename = `tidy-${activeSpace.name.toLowerCase().replace(/\s+/g, '-')}-tasks.ics`;
+    downloadIcsFile(icsContent, filename);
+    toast.success(`Exported ${currentSpaceTasks.length} task(s) to ${filename}`);
+    setIsExportDialogOpen(false);
+  };
+
+  const handleExportAllSpaces = async () => {
+    if (!userId) return;
+    setIsExporting(true);
+    try {
+      const { data: allTasks, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_done', false)
+        .not('due_date', 'is', null);
+
+      if (error) throw error;
+
+      if (!allTasks || allTasks.length === 0) {
+        toast.info('No incomplete dated tasks found across all spaces.');
+        return;
+      }
+
+      const { data: allLists } = await supabase
+        .from('lists')
+        .select('*')
+        .eq('user_id', userId);
+
+      const icsContent = generateIcs({
+        tasks: allTasks,
+        spaces,
+        lists: allLists || lists,
+        timezone: 'Africa/Lagos',
+      });
+
+      downloadIcsFile(icsContent, 'tidy-all-spaces-tasks.ics');
+      toast.success(`Exported ${allTasks.length} task(s) to tidy-all-spaces-tasks.ics`);
+      setIsExportDialogOpen(false);
+    } catch (err: unknown) {
+      console.error('Export error:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to export calendar';
+      toast.error(msg);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // ── Computed
   const activeSpace = spaces.find(s => s.id === activeSpaceId);
   const accent = getAccent(activeSpace?.color ?? 'gray');
   const spaceLists = lists.filter(l => l.space_id === activeSpaceId);
-  const unlistedTasks = tasks.filter(t => t.space_id === activeSpaceId && t.list_id === null);
 
   // Delete dialog counts
   const deleteDialogInfo = (() => {
@@ -553,6 +891,7 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
     onCreateSpace: createSpace,
     onDeleteSpace: (s: Space) => setDeleteTarget({ type: 'space', item: s }),
     onOpenVoice: () => setIsVoiceOpen(true),
+    onOpenExport: () => setIsExportDialogOpen(true),
   };
 
   const SidebarEl = <Sidebar {...sidebarProps} />;
@@ -648,12 +987,14 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
                           key={list.id}
                           list={list}
                           tasks={tasks.filter(t => t.list_id === list.id)}
+                          spaceName={activeSpace.name}
                           accent={accent}
                           onToggle={toggleTask}
                           onDeleteTask={deleteTask}
                           onDeleteList={l => setDeleteTarget({ type: 'list', item: l })}
                           onRenameList={renameList}
                           onAddTask={addTask}
+                          onUpdateTask={updateTask}
                           sensors={sensors}
                           onDragEnd={handleDragEnd}
                         />
@@ -675,6 +1016,70 @@ export default function Dashboard({ userEmail }: { userEmail: string }) {
           </main>
         </div>
       </div>
+
+
+      {/* Calendar Export Dialog (Phase 3.5) */}
+      <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <Calendar className="h-5 w-5 text-indigo-500" />
+              Export to calendar (.ics)
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              Download an iCalendar (.ics) file to import your scheduled tasks into Google Calendar, Apple Calendar, or Outlook.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-3">
+            <div className="p-3.5 rounded-xl border bg-card hover:bg-secondary/40 transition-colors flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-sm">Current Space ({activeSpace?.name})</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {tasks.filter((t) => t.space_id === activeSpaceId && !t.is_done && t.due_date).length} incomplete dated task(s)
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleExportCurrentSpace}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-8 px-3"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Download
+              </Button>
+            </div>
+
+            <div className="p-3.5 rounded-xl border bg-card hover:bg-secondary/40 transition-colors flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-sm">All Spaces</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Export all incomplete dated tasks across your entire account
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleExportAllSpaces}
+                disabled={isExporting}
+                className="text-xs h-8 px-3"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                {isExporting ? 'Preparing...' : 'Download'}
+              </Button>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground text-center pt-1">
+              Scheduled in Africa/Lagos (WAT, UTC+1). No Google login required.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setIsExportDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirmation dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={open => !open && setDeleteTarget(null)}>
