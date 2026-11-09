@@ -6,11 +6,11 @@
 |---|---|
 | 1 Foundation (auth, database, RLS) | Done and deployed |
 | 2 Core app (spaces, lists, tasks, delete, theme) | Done and deployed |
-| 3 Voice and AI | Built on branch `voice-feature`, merged to `main`. Overlap deduplication applied. Awaiting `GEMINI_API_KEY` on Vercel |
-| 3.5 Calendar export (Level 1) | Planned |
-| 4 Polish | Planned |
-| 5 Deploy | Initial deploy done. Redeploy after every merge to `main` |
-| 6 Calendar sync (Level 3) | Future, only after Phases 3.5 and 4 |
+| 3 Voice and AI | Done (merged to `main`) |
+| 3.5 Calendar export (Level 1) | Done (built & verified) |
+| 4 Polish | Done (Today view, search, settings, skeletons, a11y) |
+| 5 Deploy | Deploying to production (merge to `main`) |
+| 6 Calendar sync & WhatsApp | Future enhancements (spec in `docs/WHATSAPP_INTEGRATION_SPEC.md`) |
 
 Production URL: https://tidy-to-do-app.vercel.app
 
